@@ -93,9 +93,12 @@ class PaddleOCRTensorRT:
             binding = engine.get_tensor_name(i)
 
             # ⚠️ context에서 실제 설정된 shape 가져오기 (중요!)
-            shape_engine = engine.get_tensor_shape(binding)
             shape = context.get_tensor_shape(binding)
             dtype = engine.get_tensor_dtype(binding)
+
+            print(f"📦 Binding: {binding}")
+            print(f"   Shape: {shape}")
+            print(f"   Dtype: {dtype}")
 
             # -1이 있으면 에러
             if -1 in shape:
@@ -105,11 +108,6 @@ class PaddleOCRTensorRT:
                 )
 
             np_dtype = trt.nptype(dtype)
-
-            print(f"📦 Binding: {binding}")
-            print(f"   Shape: {shape}")
-            print(f"   Shape Engine: {shape_engine}")
-            print(f"   Dtype: {dtype}")
 
             if engine.get_tensor_mode(binding) == trt.TensorIOMode.INPUT:
                 # Input 버퍼 - GPU 메모리만 할당
@@ -134,86 +132,27 @@ class PaddleOCRTensorRT:
 
     def _preprocess_det(self, image: np.ndarray) -> Tuple[np.ndarray, float, Tuple]:
         """Detection 전처리 (좌표 어긋남 수정 버전)"""
-
         h, w = image.shape[:2]
-
         target_size = 960
-        ratio = min(target_size / h, target_size / w)
-
+        ratio_h, ratio_w = target_size / h, target_size / w
         # 1️⃣ 실제 resize 크기
-        resize_h = int(h * ratio)
-        resize_w = int(w * ratio)
-
+        resize_h = int(h * ratio_h)
+        resize_w = int(w * ratio_w)
         resized = cv2.resize(image, (resize_w, resize_h))
-
         # 2️⃣ 32의 배수로 올림 (내림 ❌)
         pad_h = int(np.ceil(resize_h / 32) * 32)
         pad_w = int(np.ceil(resize_w / 32) * 32)
-
         # 3️⃣ padding (오른쪽, 아래쪽만)
         padded = np.zeros((pad_h, pad_w, 3), dtype=np.float32)
         padded[:resize_h, :resize_w, :] = resized.astype(np.float32)
-
         # 4️⃣ 정규화
         mean = np.array([0.485, 0.456, 0.406]).reshape(1, 1, 3)
         std = np.array([0.229, 0.224, 0.225]).reshape(1, 1, 3)
-
         normalized = (padded / 255.0 - mean) / std
-
         # 5️⃣ CHW 변환
         img_tensor = normalized.transpose(2, 0, 1)
         img_tensor = np.expand_dims(img_tensor, axis=0).astype(np.float32)
-
-        return img_tensor, ratio, (h, w)
-
-    def _postprocess_det(
-        self,
-        pred: torch.Tensor,
-        ratio: float,
-        orig_size: Tuple[int, int],
-        thresh: float = 0.3,
-    ):
-        """
-        pred: (1,1,H,W) torch.cuda tensor
-        """
-
-        # 1️⃣ squeeze
-        pred = pred[0, 0]  # (H,W) on CUDA
-
-        # 2️⃣ threshold (GPU)
-        binary = (pred > thresh).to(torch.uint8)
-
-        # 3️⃣ optional: morphology (GPU)
-        # 간단한 closing 효과
-        kernel = torch.ones((1, 1, 3, 3), device=pred.device)
-        binary = F.conv2d(
-            binary.unsqueeze(0).unsqueeze(0).float(),
-            kernel,
-            padding=1,
-        )
-        binary = (binary > 0).to(torch.uint8)[0, 0]
-
-        # 🔥 여기까지 GPU
-
-        # 4️⃣ contour는 CPU에서 처리 (최소 데이터만 이동)
-        binary_cpu = binary.cpu().numpy() * 255
-
-        contours, _ = cv2.findContours(
-            binary_cpu,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-
-        boxes = []
-
-        for contour in contours:
-            rect = cv2.minAreaRect(contour)
-            box = cv2.boxPoints(rect)
-
-            box = box / ratio
-            boxes.append(box.astype("int32"))
-
-        return boxes
+        return img_tensor, ratio_h, ratio_w, (h, w)
 
     def _preprocess_rec(
         self, image: np.ndarray, boxes: List[np.ndarray]
@@ -290,7 +229,7 @@ class PaddleOCRTensorRT:
 
     def detect_text(self, image: np.ndarray):
 
-        img_tensor, ratio, orig_size = self._preprocess_det(image)
+        img_tensor, ratio_h, ratio_w, orig_size = self._preprocess_det(image)
         img_torch = torch.from_numpy(img_tensor).cuda().contiguous()
 
         input_name = None
@@ -327,13 +266,46 @@ class PaddleOCRTensorRT:
         pred_cpu = pred.detach().cpu().numpy()
 
         src_h, src_w = orig_size
-        shape_list = [[src_h, src_w, ratio, ratio]]
+        shape_list = [[src_h, src_w, ratio_h, ratio_w]]
 
         outs_dict = {"maps": pred_cpu}
 
         post_result = self.db_postprocess(outs_dict, shape_list)
 
         boxes = post_result[0]["points"]
+        print(f"type boxes: {type(boxes)}")
+        print(f"num boxes: {len(boxes)}")
+
+        # 원본 이미지 복사
+        debug_img = image.copy()
+
+        for i, box in enumerate(boxes):
+
+            box = box.astype(np.int32)
+
+            # 다각형 그리기
+            cv2.polylines(
+                debug_img,
+                [box],
+                isClosed=True,
+                color=(0, 255, 0),
+                thickness=2,
+            )
+
+            # 인덱스 표시
+            cv2.putText(
+                debug_img,
+                str(i),
+                tuple(box[0]),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 255),
+                2,
+            )
+
+        # 저장
+        cv2.imwrite("debug_det_result.jpg", debug_img)
+        print("✅ debug image saved: debug_det_result.jpg")
 
         return boxes
 
@@ -360,6 +332,7 @@ class PaddleOCRTensorRT:
                 break
 
         N, C, H, W = img_batch.shape
+        print(f"Recognize batch size: {N}, C: {C}, H: {H}, W: {W}")
         self.rec_context.set_input_shape(input_name, (N, C, H, W))
 
         # 버퍼 할당
@@ -400,6 +373,7 @@ class PaddleOCRTensorRT:
 
         # 1. 텍스트 검출
         boxes = self.detect_text(image)
+        exit(0)
 
         # 2. 텍스트 인식
         results = self.recognize_text(image, boxes)
