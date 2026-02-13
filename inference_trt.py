@@ -500,17 +500,22 @@ class PaddleOCRTensorRT:
         """전체 OCR 파이프라인"""
         # 이미지 로드
         image = cv2.imread(image_path)
+        character_dict = self._load_character_dict(r"ppocr/utils/dict/ppocrv5_dict.txt")
         if image is None:
             raise ValueError(f"Failed to load image: {image_path}")
 
         # 1. 텍스트 검출
-        boxes = self.detect_text(image)
-        exit(0)
+        boxes = self.detect(image)
+        print(f"Detected {len(boxes)} text boxes.")
 
         # 2. 텍스트 인식
-        results = self.recognize_text(image, boxes)
+        rec_output = self.recognize(image, boxes)
 
-        return results
+        text, confs = self.ctc_decode(rec_output, character_dict)
+
+        self.draw_ocr_results(image, boxes, text, confs)
+
+        return boxes, rec_output
 
 
 def main():
