@@ -10,15 +10,18 @@ import tqdm
 
 
 class OpenVINOOCR:
+
     def __init__(
         self,
         det_model_path: str,
         rec_model_path: str,
         device: str = "AUTO",  # "CPU", "GPU", "AUTO"
         visualize: bool = False,
+        save_dir: str = "output",
     ):
         self.visualize = visualize
         self.filename = ""
+        self.save_dir = save_dir
         self.core = ov.Core()
 
         # ------------------------
@@ -302,7 +305,7 @@ class OpenVINOOCR:
                 1,
                 cv2.LINE_AA,
             )
-        save_path = "detect_rec_result_" + self.filename
+        save_path = os.path.join(self.save_dir, "ov_detect_rec_result_" + self.filename)
 
         cv2.imwrite(save_path, vis_img)
         print(f"✅ debug(detect_rec) image saved: {save_path}")
@@ -333,7 +336,7 @@ class OpenVINOOCR:
                 (0, 0, 255),
                 2,
             )
-        save_path = "detect_result_" + self.filename
+        save_path = os.path.join(self.save_dir, "ov_detect_result_" + self.filename)
         cv2.imwrite(save_path, debug_img)
         print(f"✅ debug(detect) image saved: {save_path}")
 
@@ -381,24 +384,31 @@ if __name__ == "__main__":
         action="store_true",
         help="Visualize detection results",
     )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="output",
+        help="Directory to save visualized results",
+    )
 
     args = parser.parse_args()
 
     ocr = OpenVINOOCR(
-        args.det_model_path, args.rec_model_path, device="CPU", visualize=args.visualize
+        args.det_model_path,
+        args.rec_model_path,
+        device="CPU",
+        visualize=args.visualize,
+        save_dir=args.save_dir,
     )
     folder = r"/mnt/d/workspace/HENKEL/syringe_temp"
     for filename in os.listdir(folder):
         if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
             continue
 
-        ocr.filename = filename
         image_path = os.path.join(folder, filename)
+        ocr.filename = filename
         print(f"\n{'='*60}")
         print(f"Processing: {image_path}")
+        results = ocr.predict(image_path)
+        print(f"\n📊 Total detections: {len(results)}")
         print(f"{'='*60}")
-
-        boxes, rec_out = ocr.predict(image_path)
-
-        print("Detected boxes:", len(boxes))
-        print("Recognition output shape:", rec_out.shape if len(boxes) > 0 else None)
