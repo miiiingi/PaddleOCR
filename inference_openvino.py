@@ -5,6 +5,8 @@ from typing import List, Tuple
 import argparse
 import os
 from db_postprocess import DBPostProcess
+import time
+import tqdm
 
 
 class OpenVINOOCR:
