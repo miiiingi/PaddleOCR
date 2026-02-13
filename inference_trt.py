@@ -519,17 +519,35 @@ class PaddleOCRTensorRT:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="ONNX → OpenVINO Converter")
+
+    parser.add_argument(
+        "--det_model_path",
+        type=str,
+        required=True,
+        help="Input Detection model path (.trt)",
+    )
+    parser.add_argument(
+        "--rec_model_path",
+        type=str,
+        required=True,
+        help="Input Recognition model path (.trt)",
+    )
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Visualize detection results",
+    )
+
+    args = parser.parse_args()
+
     """사용 예제"""
-    # TensorRT 엔진 파일 경로
-    det_engine_path = r"output_onnx/det.trt"
-    rec_engine_path = r"output_onnx/rec.trt"
-    dict_path = r"ppocr/utils/dict/ppocrv5_dict.txt"  # 옵션
 
     # OCR 엔진 초기화
     ocr = PaddleOCRTensorRT(
-        det_engine_path=det_engine_path,
-        rec_engine_path=rec_engine_path,
-        dict_path=dict_path,
+        det_engine_path=args.det_model_path,
+        rec_engine_path=args.rec_model_path,
+        visualize=args.visualize,
     )
 
     # 이미지 폴더 처리
