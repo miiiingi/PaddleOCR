@@ -553,39 +553,17 @@ def main():
     # 이미지 폴더 처리
     folder = r"/mnt/d/workspace/HENKEL/syringe_temp"
 
-    # 정규식 패턴
-    pattern = re.compile(
-        r"(batch|batch number|number:|idh#|net weight|weight|no\.|P/N:|BATCH|"
-        r"Syringe#:|EXP:|Net weight:|weight:|Storage Temp:|Temp:|IDH|#:|LOT#|"
-        r"D.O.M:|SID#|Part No:|No:|Vender ID:|ID:|Lot No:|No:|Temp:|"
-        r"Storage Temp:|DOM|NET WT:|WT:|P.O#|Hen)",
-        re.IGNORECASE,
-    )
-
     for filename in os.listdir(folder):
         if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
             continue
 
         image_path = os.path.join(folder, filename)
+        ocr.filename = filename
         print(f"\n{'='*60}")
         print(f"Processing: {image_path}")
-        print(f"{'='*60}")
-
-        # 추론
-        start = time.time()
         results = ocr.predict(image_path)
-        end = time.time()
-
-        # 결과 출력
-        for text, score, box in results:
-            text_norm = text.lower().strip()
-            if pattern.search(text):
-                print(f"✅ text: {text}")
-                print(f"   score: {score:.3f}")
-                print(f"   box: {box.tolist()}")
-
-        print(f"\n⏱️  Duration: {end - start:.3f}s")
-        print(f"📊 Total detections: {len(results)}")
+        print(f"\n📊 Total detections: {len(results)}")
+        print(f"{'='*60}")
 
 
 if __name__ == "__main__":
