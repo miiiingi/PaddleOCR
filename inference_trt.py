@@ -26,6 +26,7 @@ class PaddleOCRTensorRT:
         det_engine_path: str,
         rec_engine_path: str,
         visualize: bool = False,
+        save_dir: str = "output",
     ):
         """
         Args:
@@ -34,6 +35,7 @@ class PaddleOCRTensorRT:
             dict_path: OCR 문자 사전 파일 경로
         """
         self.visualize = visualize
+        self.save_dir = save_dir
         self.filename = ""
         # TensorRT 로거
         self.logger = trt.Logger(trt.Logger.INFO)
@@ -461,7 +463,9 @@ class PaddleOCRTensorRT:
                 1,
                 cv2.LINE_AA,
             )
-        save_path = "trt_detect_rec_result_" + self.filename
+        save_path = os.path.join(
+            self.save_dir, "trt_detect_rec_result_" + self.filename
+        )
 
         cv2.imwrite(save_path, vis_img)
         print(f"✅ debug(detect_rec) image saved: {save_path}")
@@ -492,7 +496,7 @@ class PaddleOCRTensorRT:
                 (0, 0, 255),
                 2,
             )
-        save_path = "trt_detect_result_" + self.filename
+        save_path = os.path.join(self.save_dir, "trt_detect_result_" + self.filename)
         cv2.imwrite(save_path, debug_img)
         print(f"✅ debug(detect) image saved: {save_path}")
 
@@ -538,6 +542,12 @@ def main():
         action="store_true",
         help="Visualize detection results",
     )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="output",
+        help="Directory to save visualized results",
+    )
 
     args = parser.parse_args()
 
@@ -548,6 +558,7 @@ def main():
         det_engine_path=args.det_model_path,
         rec_engine_path=args.rec_model_path,
         visualize=args.visualize,
+        save_dir=args.save_dir,
     )
 
     # 이미지 폴더 처리
