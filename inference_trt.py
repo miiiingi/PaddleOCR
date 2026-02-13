@@ -5,11 +5,11 @@ import cv2
 import numpy as np
 import tensorrt as trt
 import pycuda.driver as cuda
-from PIL import Image
 from typing import List, Tuple, Dict
 import torch
-import torch.nn.functional as F
 from db_postprocess import DBPostProcess
+import argparse
+import tqdm
 
 cuda.init()
 device = cuda.Device(0)
@@ -25,7 +25,7 @@ class PaddleOCRTensorRT:
         self,
         det_engine_path: str,
         rec_engine_path: str,
-        dict_path: str = None,
+        visualize: bool = False,
     ):
         """
         Args:
@@ -33,6 +33,8 @@ class PaddleOCRTensorRT:
             rec_engine_path: Recognition TensorRT engine 파일 경로
             dict_path: OCR 문자 사전 파일 경로
         """
+        self.visualize = visualize
+        self.filename = ""
         # TensorRT 로거
         self.logger = trt.Logger(trt.Logger.INFO)
 
@@ -43,7 +45,6 @@ class PaddleOCRTensorRT:
         self.rec_engine, self.rec_context = self._load_engine(rec_engine_path)
 
         # 문자 사전 로드
-        self.char_dict = self._load_dict(dict_path) if dict_path else None
         self.db_postprocess = DBPostProcess(
             thresh=0.3,
             box_thresh=0.6,
@@ -51,10 +52,6 @@ class PaddleOCRTensorRT:
             unclip_ratio=1.5,
             box_type="quad",
         )
-        print(f"self det engine: {self.det_engine}")
-        print(f"self rec engine: {self.rec_engine}")
-        print(f"self det context: {self.det_context}")
-        print(f"self rec context: {self.rec_context}")
 
         print(f"✅ Detection engine loaded: {det_engine_path}")
         print(f"✅ Recognition engine loaded: {rec_engine_path}")
@@ -72,10 +69,10 @@ class PaddleOCRTensorRT:
 
         return engine, context
 
-    def _load_dict(self, dict_path: str) -> List[str]:
-        """문자 사전 로드"""
+    def _load_character_dict(self, dict_path):
         with open(dict_path, "r", encoding="utf-8") as f:
-            chars = [line.strip() for line in f]
+            chars = [line.strip() for line in f.readlines()]
+        chars = [""] + chars  # blank for CTC
         return chars
 
     def _allocate_buffers(
@@ -95,10 +92,6 @@ class PaddleOCRTensorRT:
             # ⚠️ context에서 실제 설정된 shape 가져오기 (중요!)
             shape = context.get_tensor_shape(binding)
             dtype = engine.get_tensor_dtype(binding)
-
-            print(f"📦 Binding: {binding}")
-            print(f"   Shape: {shape}")
-            print(f"   Dtype: {dtype}")
 
             # -1이 있으면 에러
             if -1 in shape:
@@ -279,10 +272,11 @@ class PaddleOCRTensorRT:
 
         return results
 
-    def detect_text(self, image: np.ndarray):
+    def detect(self, image: np.ndarray):
 
         img_tensor, ratio_h, ratio_w, orig_size = self._preprocess_det(image)
-        img_torch = torch.from_numpy(img_tensor).cuda().contiguous()
+        img_tensor = np.ascontiguousarray(img_tensor)
+        img_torch = torch.from_numpy(img_tensor).cuda()
 
         input_name = None
         for i in range(self.det_engine.num_io_tensors):
@@ -316,7 +310,6 @@ class PaddleOCRTensorRT:
 
         # 🔥 Paddle DBPostProcess 적용
         pred_cpu = pred.detach().cpu().numpy()
-
         src_h, src_w = orig_size
         shape_list = [[src_h, src_w, ratio_h, ratio_w]]
 
@@ -499,67 +492,9 @@ class PaddleOCRTensorRT:
                 (0, 0, 255),
                 2,
             )
-
-        # 저장
-        cv2.imwrite("debug_det_result.jpg", debug_img)
-        print("✅ debug image saved: debug_det_result.jpg")
-
-        return boxes
-
-    def recognize_text(
-        self, image: np.ndarray, boxes: List[np.ndarray]
-    ) -> List[Tuple[str, float, np.ndarray]]:
-        """텍스트 인식"""
-        if len(boxes) == 0:
-            return []
-
-        # 전처리
-        cropped_images = self._preprocess_rec(image, boxes)
-
-        # 배치 처리
-        batch_size = len(cropped_images)
-        img_batch = np.array(cropped_images, dtype=np.float32)
-
-        # 입력 shape 설정
-        input_name = None
-        for i in range(self.rec_engine.num_io_tensors):
-            name = self.rec_engine.get_tensor_name(i)
-            if self.rec_engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                input_name = name
-                break
-
-        N, C, H, W = img_batch.shape
-        print(f"Recognize batch size: {N}, C: {C}, H: {H}, W: {W}")
-        self.rec_context.set_input_shape(input_name, (N, C, H, W))
-
-        # 버퍼 할당
-        bindings, stream, outputs = self._allocate_buffers(
-            self.rec_engine, self.rec_context, N
-        )
-
-        # 입력 데이터 복사
-        for binding in self.rec_engine:
-            self.rec_context.set_tensor_address(binding, int(bindings[binding]))
-
-        img_torch = torch.from_numpy(img_batch).cuda()
-        cuda.memcpy_dtod_async(
-            dest=int(bindings[input_name]),
-            src=int(img_torch.data_ptr()),
-            size=img_torch.nbytes,
-            stream=stream,
-        )
-
-        # 추론
-        self._do_inference(self.rec_context, stream)
-
-        # 출력 가져오기
-        output_name = list(outputs.keys())[0]
-        preds = outputs[output_name].cpu().numpy()
-
-        # 후처리
-        results = self._postprocess_rec(preds, boxes)
-
-        return results
+        save_path = "trt_detect_result_" + self.filename
+        cv2.imwrite(save_path, debug_img)
+        print(f"✅ debug(detect) image saved: {save_path}")
 
     def predict(self, image_path: str) -> List[Tuple[str, float, np.ndarray]]:
         """전체 OCR 파이프라인"""
