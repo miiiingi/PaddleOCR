@@ -85,18 +85,6 @@ class OpenVINOOCR:
         img_tensor = np.expand_dims(img_tensor, axis=0).astype(np.float32)
         return img_tensor, ratio_h, ratio_w, (h, w)
 
-    def postprocess_det(self, det_map, thresh: float = 0.3):
-        binary = (det_map > thresh).astype(np.uint8) * 255
-
-        contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-
-        boxes = []
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            boxes.append(np.array([x, y, x + w, y + h]))
-
-        return boxes
-
     def detect(self, image: np.ndarray) -> np.ndarray:
         input_tensor, ratio_h, ratio_w, original_size = self.preprocess_det(image)
 
