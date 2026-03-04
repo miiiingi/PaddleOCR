@@ -1,6 +1,5 @@
 import os
 import time
-import re
 import cv2
 import numpy as np
 import tensorrt as trt
@@ -9,7 +8,6 @@ from typing import List, Tuple, Dict
 import torch
 from db_postprocess import DBPostProcess
 import argparse
-import tqdm
 
 cuda.init()
 device = cuda.Device(0)
