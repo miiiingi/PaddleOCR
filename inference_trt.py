@@ -243,37 +243,6 @@ class PaddleOCRTensorRT:
 
         return norm_img_batch
 
-    def _postprocess_rec(
-        self, preds: np.ndarray, boxes: List[np.ndarray]
-    ) -> List[Tuple[str, float, np.ndarray]]:
-        """Recognition 후처리"""
-        results = []
-
-        for i, box in enumerate(boxes):
-            pred = preds[i]  # (T, C)
-
-            # CTC 디코딩
-            indices = np.argmax(pred, axis=-1)
-
-            # 중복 제거 및 blank 제거
-            text = []
-            prev_idx = -1
-            for idx in indices:
-                if idx != prev_idx and idx != 0:  # 0은 blank
-                    if self.char_dict and idx < len(self.char_dict):
-                        text.append(self.char_dict[idx])
-                prev_idx = idx
-
-            text_str = "".join(text)
-
-            # 신뢰도 계산
-            max_probs = np.max(pred, axis=-1)
-            confidence = float(np.mean(max_probs))
-
-            results.append((text_str, confidence, box))
-
-        return results
-
     def detect(self, image: np.ndarray):
 
         img_tensor, ratio_h, ratio_w, orig_size = self._preprocess_det(image)
@@ -572,8 +541,18 @@ def main():
         ocr.filename = filename
         print(f"\n{'='*60}")
         print(f"Processing: {image_path}")
-        results = ocr.predict(image_path)
+        total_time = 0
+        for i in range(101):
+            start = time.time()
+            results = ocr.predict(image_path)
+            end = time.time()
+            if i > 1:
+                total_time += end - start
+
         print(f"\n📊 Total detections: {len(results)}")
+        print(
+            f"📊 Average inference time (excluding first 2 runs): {total_time / 100:.4f} seconds"
+        )
         print(f"{'='*60}")
 
 
