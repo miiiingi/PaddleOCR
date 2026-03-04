@@ -53,11 +53,11 @@ def build_trt_engine(
     if "det" in onnx_file_path:
         min_shape = (1, 3, 320, 320)
         opt_shape = (1, 3, 960, 960)
-        max_shape = (1, 3, 4032, 4032)
+        max_shape = (1, 3, 1920, 1920)
     elif "rec" in onnx_file_path:
         min_shape = (1, 3, 48, 32)
-        opt_shape = (32, 3, 48, 320)
-        max_shape = (128, 3, 48, 320)
+        opt_shape = (16, 3, 48, 320)
+        max_shape = (96, 3, 48, 320)
 
     print(
         f"Optimization Profile for '{input_name}': min={min_shape}, opt={opt_shape}, max={max_shape}"
@@ -142,7 +142,7 @@ def main():
         args.onnx_file,
         args.engine_file,
         # dummy_input,
-        max_workspace_size=1 << 28,
+        max_workspace_size=4 << 30,
         fp16_mode=args.fp16,
         int8_mode=args.int8,
         strip_weights=args.strip_weights,
